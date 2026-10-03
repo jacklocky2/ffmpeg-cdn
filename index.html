@@ -50,5 +50,8 @@ const data = await ffmpeg.readFile("output.mp4");
 </table>
 
 <p>顶层 <code>util/index.js</code> 保留为旧版 <code>@ffmpeg/util</code> 入口，可继续使用。</p>
+
+<h2>跨源使用</h2>
+<p>浏览器<b>禁止构造跨源 module worker</b>（<code>SecurityError: Failed to construct 'Worker'</code>）。<code>classes.js</code> 已内建兜底：当 <code>worker.js</code> 与页面不同源时，会拉取其源码、把相对依赖改写成绝对 URL，再包成本页同源的 blob URL 启动。所以任意域名直接 <code>import</code> 即可，无需传 <code>classWorkerURL</code>；同源部署时行为与官方一致。</p>
 </body>
 </html>

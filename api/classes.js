@@ -2,6 +2,39 @@ import { FFMessageType } from "./const.js";
 import { getMessageID } from "./utils.js";
 import { ERROR_TERMINATED, ERROR_NOT_LOADED } from "./errors.js";
 /**
+ * Resolves the URL used to spawn the class worker.
+ *
+ * Browsers refuse to construct a **cross-origin module worker**
+ * (`SecurityError: Failed to construct 'Worker': Script at ... cannot be
+ * accessed from origin ...`), which is the normal case when the library is
+ * imported from a CDN.
+ *
+ * Workaround: fetch the worker source, rewrite its relative dependencies to
+ * absolute URLs and wrap it in a blob URL. A blob inherits the current page
+ * origin, so the Worker can be constructed normally.
+ *
+ * Same-origin workers are returned untouched.
+ */
+const resolveWorkerURL = async (workerURL) => {
+    if (workerURL.origin === self.location.origin) {
+        return workerURL.href;
+    }
+    try {
+        const res = await fetch(workerURL);
+        if (!res.ok)
+            return workerURL.href;
+        const src = await res.text();
+        const patched = src.replace(/(\bfrom\s*|\bimport\s*\(\s*)(["'])(\.\.?\/[^"']+)\2/g, (match, head, quote, specifier) => `${head}${quote}${new URL(specifier, workerURL).href}${quote}`);
+        return URL.createObjectURL(new Blob([patched], {
+            type: "text/javascript",
+        }));
+    }
+    catch {
+        // Fall back to the original URL and let the browser report the error.
+        return workerURL.href;
+    }
+};
+/**
  * Provides APIs to interact with ffmpeg web worker.
  *
  * @example
@@ -99,17 +132,14 @@ export class FFmpeg {
      * @category FFmpeg
      * @returns `true` if ffmpeg core is loaded for the first time.
      */
-    load = ({ classWorkerURL, ...config } = {}, { signal } = {}) => {
+    load = async ({ classWorkerURL, ...config } = {}, { signal } = {}) => {
         if (!this.#worker) {
-            this.#worker = classWorkerURL ?
-                new Worker(new URL(classWorkerURL, import.meta.url), {
-                    type: "module",
-                }) :
-                // We need to duplicated the code here to enable webpack
-                // to bundle worekr.js here.
-                new Worker(new URL("./worker.js", import.meta.url), {
-                    type: "module",
-                });
+            if (!classWorkerURL) {
+                classWorkerURL = await resolveWorkerURL(new URL("./worker.js", import.meta.url));
+            }
+            this.#worker = new Worker(new URL(classWorkerURL, import.meta.url), {
+                type: "module",
+            });
             this.#registerHandlers();
         }
         return this.#send({
